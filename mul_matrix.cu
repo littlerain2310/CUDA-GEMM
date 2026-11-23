@@ -39,25 +39,37 @@ __global__ void matrixMulKernel(const float* A, const float* B, float* C, int N)
 
     for (int ph = 0; ph < (N + TILE_WIDTH - 1) / TILE_WIDTH; ph++) {
         for (int b =0; b < BLOCK_COMPUTE; b++){
-            if (row < N && (ph * TILE_WIDTH + tx) < N) {
-                ds_A[ty+b*TILE_WIDTH][tx] = A[(row+b *TILE_WIDTH) * N + ph * TILE_WIDTH + tx];
+            int r_load = row + b * TILE_WIDTH;
+            int c_load = col + b * TILE_WIDTH;
+
+            if (r_load < N && (ph * TILE_WIDTH + tx) < N) {
+                ds_A[ty + b * TILE_WIDTH][tx] = A[r_load * N + ph * TILE_WIDTH + tx];
             } else {
-                ds_A[ty+b*TILE_WIDTH][tx] = 0.0f;
+                ds_A[ty + b * TILE_WIDTH][tx] = 0.0f;
             }
 
-            if (col < N && (ph * TILE_WIDTH + ty) < N) {
-                ds_B[ty][tx+b*TILE_WIDTH] = B[(ph * TILE_WIDTH + ty) * N + col +b*TILE_WIDTH];
+            if (c_load < N && (ph * TILE_WIDTH + ty) < N) {
+                ds_B[ty][tx + b * TILE_WIDTH] = B[(ph * TILE_WIDTH + ty) * N + c_load];
             } else {
-                ds_B[ty][tx+b*TILE_WIDTH] = 0.0f;
+                ds_B[ty][tx + b * TILE_WIDTH] = 0.0f;
             }
+
         }
         
 
         __syncthreads();
+        float reg_A[BLOCK_COMPUTE];
+        float reg_B[BLOCK_COMPUTE];
         for (int k = 0; k < TILE_WIDTH; k++) {
+            for (int bi = 0; bi < BLOCK_COMPUTE; bi++) {
+                reg_A[bi] = ds_A[ty + bi * TILE_WIDTH][k];
+            }
+            for (int bj = 0; bj < BLOCK_COMPUTE; bj++) {
+                reg_B[bj] = ds_B[k][tx + TILE_WIDTH * bj];
+            }
             for (int bi = 0; bi < BLOCK_COMPUTE;bi ++ ){
                 for (int bj = 0; bj < BLOCK_COMPUTE;bj ++ ){
-                    sum[bi][bj] += ds_A[ty + bi * TILE_WIDTH ][k] * ds_B[k][tx + TILE_WIDTH * bj];
+                    sum[bi][bj] += reg_A[bi] * reg_B[bj];
                 }
             } 
         }
@@ -65,6 +77,7 @@ __global__ void matrixMulKernel(const float* A, const float* B, float* C, int N)
 
         __syncthreads();
     }
+    
     for (int bi = 0; bi < BLOCK_COMPUTE;bi ++ ){
         int r =  row + bi* TILE_WIDTH;
         for (int bj = 0; bj < BLOCK_COMPUTE;bj ++ ){
@@ -75,6 +88,8 @@ __global__ void matrixMulKernel(const float* A, const float* B, float* C, int N)
         }
     } 
 }
+
+
 
 // Hàm kiểm tra kết quả của Custom Kernel dựa trên kết quả chuẩn của cuBLAS (nhanh hơn dùng CPU nhiều lần)
 void verifyWithCublas(const float* h_C_custom, const float* h_C_cublas, int N) {
